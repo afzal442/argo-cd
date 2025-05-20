@@ -8,7 +8,7 @@
     "github>afzal442/argo-cd//renovate-presets/devtool.json5",
     "github>afzal442/argo-cd//renovate-presets/docs.json5"
   ],
-  "enabledManagers": ["helm"],
+  "enabledManagers": ["helm-values"],
   "packageRules": [
     {
       "matchPackageNames": ["redis-ha"],
