@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -72,19 +73,19 @@ func NewWebhookHandler(namespace string, webhookParallelism int, argocdSettingsM
 	// register the webhook secrets stored under "argocd-secret" for verifying incoming payloads
 	argocdSettings, err := argocdSettingsMgr.GetSettings()
 	if err != nil {
-		return nil, fmt.Errorf("Failed to get argocd settings: %w", err)
+		return nil, fmt.Errorf("failed to get argocd settings: %w", err)
 	}
 	githubHandler, err := github.New(github.Options.Secret(argocdSettings.WebhookGitHubSecret))
 	if err != nil {
-		return nil, fmt.Errorf("Unable to init GitHub webhook: %w", err)
+		return nil, fmt.Errorf("unable to init GitHub webhook: %w", err)
 	}
 	gitlabHandler, err := gitlab.New(gitlab.Options.Secret(argocdSettings.WebhookGitLabSecret))
 	if err != nil {
-		return nil, fmt.Errorf("Unable to init GitLab webhook: %w", err)
+		return nil, fmt.Errorf("unable to init GitLab webhook: %w", err)
 	}
 	azuredevopsHandler, err := azuredevops.New(azuredevops.Options.BasicAuth(argocdSettings.WebhookAzureDevOpsUsername, argocdSettings.WebhookAzureDevOpsPassword))
 	if err != nil {
-		return nil, fmt.Errorf("Unable to init Azure DevOps webhook: %w", err)
+		return nil, fmt.Errorf("unable to init Azure DevOps webhook: %w", err)
 	}
 
 	webhookHandler := &WebhookHandler{
@@ -234,7 +235,7 @@ func getPRGeneratorInfo(payload any) *prGeneratorInfo {
 	var info prGeneratorInfo
 	switch payload := payload.(type) {
 	case github.PullRequestPayload:
-		if !isAllowedGithubPullRequestAction(payload.Action) {
+		if !slices.Contains(githubAllowedPullRequestActions, payload.Action) {
 			return nil
 		}
 
@@ -250,7 +251,7 @@ func getPRGeneratorInfo(payload any) *prGeneratorInfo {
 			APIRegexp: apiRegexp,
 		}
 	case gitlab.MergeRequestEventPayload:
-		if !isAllowedGitlabPullRequestAction(payload.ObjectAttributes.Action) {
+		if !slices.Contains(gitlabAllowedPullRequestActions, payload.ObjectAttributes.Action) {
 			return nil
 		}
 
@@ -266,7 +267,7 @@ func getPRGeneratorInfo(payload any) *prGeneratorInfo {
 			APIHostname: urlObj.Hostname(),
 		}
 	case azuredevops.GitPullRequestEvent:
-		if !isAllowedAzureDevOpsPullRequestAction(string(payload.EventType)) {
+		if !slices.Contains(azuredevopsAllowedPullRequestActions, string(payload.EventType)) {
 			return nil
 		}
 
@@ -309,33 +310,6 @@ var azuredevopsAllowedPullRequestActions = []string{
 	"git.pullrequest.created",
 	"git.pullrequest.merged",
 	"git.pullrequest.updated",
-}
-
-func isAllowedGithubPullRequestAction(action string) bool {
-	for _, allow := range githubAllowedPullRequestActions {
-		if allow == action {
-			return true
-		}
-	}
-	return false
-}
-
-func isAllowedGitlabPullRequestAction(action string) bool {
-	for _, allow := range gitlabAllowedPullRequestActions {
-		if allow == action {
-			return true
-		}
-	}
-	return false
-}
-
-func isAllowedAzureDevOpsPullRequestAction(action string) bool {
-	for _, allow := range azuredevopsAllowedPullRequestActions {
-		if allow == action {
-			return true
-		}
-	}
-	return false
 }
 
 func shouldRefreshGitGenerator(gen *v1alpha1.GitGenerator, info *gitGeneratorInfo) bool {

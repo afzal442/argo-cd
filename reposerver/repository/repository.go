@@ -16,23 +16,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Masterminds/semver/v3"
 	"github.com/TomOnTime/utfutil"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 	textutils "github.com/argoproj/gitops-engine/pkg/utils/text"
-	"github.com/argoproj/pkg/sync"
+	"github.com/argoproj/pkg/v2/sync"
 	jsonpatch "github.com/evanphx/json-patch"
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/google/go-jsonnet"
 	"github.com/google/uuid"
-	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
+	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/retry"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
-
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -50,7 +48,6 @@ import (
 	apppathutil "github.com/argoproj/argo-cd/v3/util/app/path"
 	"github.com/argoproj/argo-cd/v3/util/argo"
 	"github.com/argoproj/argo-cd/v3/util/cmp"
-	"github.com/argoproj/argo-cd/v3/util/env"
 	"github.com/argoproj/argo-cd/v3/util/git"
 	"github.com/argoproj/argo-cd/v3/util/glob"
 	"github.com/argoproj/argo-cd/v3/util/gpg"
@@ -62,23 +59,18 @@ import (
 	"github.com/argoproj/argo-cd/v3/util/kustomize"
 	"github.com/argoproj/argo-cd/v3/util/manifeststream"
 	"github.com/argoproj/argo-cd/v3/util/text"
+	"github.com/argoproj/argo-cd/v3/util/versions"
 )
 
 const (
 	cachedManifestGenerationPrefix = "Manifest generation error (cached)"
 	helmDepUpMarkerFile            = ".argocd-helm-dep-up"
-	allowConcurrencyFile           = ".argocd-allow-concurrency"
 	repoSourceFile                 = ".argocd-source.yaml"
 	appSourceFile                  = ".argocd-source-%s.yaml"
 	ociPrefix                      = "oci://"
 )
 
-var (
-	ErrExceededMaxCombinedManifestFileSize = errors.New("exceeded max combined manifest file size")
-	// helmConcurrencyDefault if true then helm concurrent manifest generation is enabled
-	// TODO: remove env variable and usage of .argocd-allow-concurrency once we are sure that it is safe to enable it by default
-	helmConcurrencyDefault = env.ParseBoolFromEnv("ARGOCD_HELM_ALLOW_CONCURRENCY", false)
-)
+var ErrExceededMaxCombinedManifestFileSize = errors.New("exceeded max combined manifest file size")
 
 // Service implements ManifestService interface
 type Service struct {
@@ -116,6 +108,8 @@ type RepoServerInitConstants struct {
 	IncludeHiddenDirectories                     bool
 	CMPUseManifestGeneratePaths                  bool
 }
+
+var manifestGenerateLock = sync.NewKeyLock()
 
 // NewService returns a new instance of the Manifest service
 func NewService(metricsServer *metrics.MetricsServer, cache *cache.Cache, initConstants RepoServerInitConstants, resourceTracking argo.ResourceTracking, gitCredsStore git.CredsStore, rootDir string) *Service {
@@ -344,7 +338,7 @@ func (s *Service) runRepoOperation(
 
 	if source.IsHelm() {
 		if settings.noCache {
-			err = helmClient.CleanChartCache(source.Chart, revision, repo.Project)
+			err = helmClient.CleanChartCache(source.Chart, revision)
 			if err != nil {
 				return err
 			}
@@ -353,7 +347,7 @@ func (s *Service) runRepoOperation(
 		if source.Helm != nil {
 			helmPassCredentials = source.Helm.PassCredentials
 		}
-		chartPath, closer, err := helmClient.ExtractChart(source.Chart, revision, repo.Project, helmPassCredentials, s.initConstants.HelmManifestMaxExtractedSize, s.initConstants.DisableHelmManifestMaxExtractedSize)
+		chartPath, closer, err := helmClient.ExtractChart(source.Chart, revision, helmPassCredentials, s.initConstants.HelmManifestMaxExtractedSize, s.initConstants.DisableHelmManifestMaxExtractedSize)
 		if err != nil {
 			return err
 		}
@@ -926,6 +920,7 @@ func (s *Service) getManifestCacheEntry(cacheKey string, q *apiclient.ManifestRe
 				// Otherwise, manifest generation is still paused
 				log.Infof("manifest error cache hit: %s/%s", q.ApplicationSource.String(), cacheKey)
 
+				// nolint:staticcheck // Error message constant is very old, best not to lowercase the first letter.
 				cachedErrorResponse := fmt.Errorf(cachedManifestGenerationPrefix+": %s", res.MostRecentError)
 
 				if firstInvocation {
@@ -1061,15 +1056,6 @@ func sanitizeRepoName(repoName string) string {
 	return strings.ReplaceAll(repoName, "/", "-")
 }
 
-func isConcurrencyAllowed(appPath string) bool {
-	if _, err := os.Stat(path.Join(appPath, allowConcurrencyFile)); err == nil {
-		return true
-	}
-	return false
-}
-
-var manifestGenerateLock = sync.NewKeyLock()
-
 // runHelmBuild executes `helm dependency build` in a given path and ensures that it is executed only once
 // if multiple threads are trying to run it.
 // Multiple goroutines might process same helm app in one repo concurrently when repo server process multiple
@@ -1102,12 +1088,6 @@ func isSourcePermitted(url string, repos []string) bool {
 }
 
 func helmTemplate(appPath string, repoRoot string, env *v1alpha1.Env, q *apiclient.ManifestRequest, isLocal bool, gitRepoPaths io.TempPaths) ([]*unstructured.Unstructured, string, error) {
-	concurrencyAllowed := helmConcurrencyDefault || isConcurrencyAllowed(appPath)
-	if !concurrencyAllowed {
-		manifestGenerateLock.Lock(appPath)
-		defer manifestGenerateLock.Unlock(appPath)
-	}
-
 	// We use the app name as Helm's release name property, which must not
 	// contain any underscore characters and must not exceed 53 characters.
 	// We are not interested in the fully qualified application name while
@@ -1176,7 +1156,7 @@ func helmTemplate(appPath string, repoRoot string, env *v1alpha1.Env, q *apiclie
 			referencedSource := getReferencedSource(p.Path, q.RefSources)
 			if referencedSource != nil {
 				// If the $-prefixed path appears to reference another source, do env substitution _after_ resolving the source
-				resolvedPath, err = getResolvedRefValueFile(p.Path, env, q.GetValuesFileSchemes(), referencedSource.Repo.Repo, gitRepoPaths, referencedSource.Repo.Project)
+				resolvedPath, err = getResolvedRefValueFile(p.Path, env, q.GetValuesFileSchemes(), referencedSource.Repo.Repo, gitRepoPaths)
 				if err != nil {
 					return nil, "", fmt.Errorf("error resolving set-file path: %w", err)
 				}
@@ -1226,12 +1206,7 @@ func helmTemplate(appPath string, repoRoot string, env *v1alpha1.Env, q *apiclie
 			return nil, "", err
 		}
 
-		if concurrencyAllowed {
-			err = runHelmBuild(appPath, h)
-		} else {
-			err = h.DependencyBuild()
-		}
-
+		err = runHelmBuild(appPath, h)
 		if err != nil {
 			var reposNotPermitted []string
 			// We do a sanity check here to give a nicer error message in case any of the Helm repositories are not permitted by
@@ -1302,7 +1277,7 @@ func getResolvedValueFiles(
 		referencedSource := getReferencedSource(rawValueFile, refSources)
 		if referencedSource != nil {
 			// If the $-prefixed path appears to reference another source, do env substitution _after_ resolving that source.
-			resolvedPath, err = getResolvedRefValueFile(rawValueFile, env, allowedValueFilesSchemas, referencedSource.Repo.Repo, gitRepoPaths, referencedSource.Repo.Project)
+			resolvedPath, err = getResolvedRefValueFile(rawValueFile, env, allowedValueFilesSchemas, referencedSource.Repo.Repo, gitRepoPaths)
 			if err != nil {
 				return nil, fmt.Errorf("error resolving value file path: %w", err)
 			}
@@ -1335,15 +1310,9 @@ func getResolvedRefValueFile(
 	allowedValueFilesSchemas []string,
 	refSourceRepo string,
 	gitRepoPaths io.TempPaths,
-	project string,
 ) (pathutil.ResolvedFilePath, error) {
 	pathStrings := strings.Split(rawValueFile, "/")
-
-	keyData, err := json.Marshal(map[string]string{"url": git.NormalizeGitURL(refSourceRepo), "project": project})
-	if err != nil {
-		return "", err
-	}
-	repoPath := gitRepoPaths.GetPathIfExists(string(keyData))
+	repoPath := gitRepoPaths.GetPathIfExists(git.NormalizeGitURL(refSourceRepo))
 	if repoPath == "" {
 		return "", fmt.Errorf("failed to find repo %q", refSourceRepo)
 	}
@@ -2289,7 +2258,7 @@ func populatePluginAppDetails(ctx context.Context, res *apiclient.RepoAppDetails
 }
 
 func (s *Service) GetRevisionMetadata(_ context.Context, q *apiclient.RepoServerRevisionMetadataRequest) (*v1alpha1.RevisionMetadata, error) {
-	if !(git.IsCommitSHA(q.Revision) || git.IsTruncatedCommitSHA(q.Revision)) {
+	if !git.IsCommitSHA(q.Revision) && !git.IsTruncatedCommitSHA(q.Revision) {
 		return nil, fmt.Errorf("revision %s must be resolved", q.Revision)
 	}
 	metadata, err := s.cache.GetRevisionMetadata(q.Repo.Repo, q.Revision)
@@ -2379,7 +2348,7 @@ func (s *Service) GetRevisionChartDetails(_ context.Context, q *apiclient.RepoSe
 	if err != nil {
 		return nil, fmt.Errorf("helm client error: %w", err)
 	}
-	chartPath, closer, err := helmClient.ExtractChart(q.Name, revision, q.Repo.Project, false, s.initConstants.HelmManifestMaxExtractedSize, s.initConstants.DisableHelmManifestMaxExtractedSize)
+	chartPath, closer, err := helmClient.ExtractChart(q.Name, revision, false, s.initConstants.HelmManifestMaxExtractedSize, s.initConstants.DisableHelmManifestMaxExtractedSize)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting chart: %w", err)
 	}
@@ -2409,11 +2378,7 @@ func fileParameters(q *apiclient.RepoServerAppDetailsQuery) []v1alpha1.HelmFileP
 }
 
 func (s *Service) newClient(repo *v1alpha1.Repository, opts ...git.ClientOpts) (git.Client, error) {
-	keyData, err := json.Marshal(map[string]string{"url": git.NormalizeGitURL(repo.Repo), "project": repo.Project})
-	if err != nil {
-		return nil, err
-	}
-	repoPath, err := s.gitRepoPaths.GetPath(string(keyData))
+	repoPath, err := s.gitRepoPaths.GetPath(git.NormalizeGitURL(repo.Repo))
 	if err != nil {
 		return nil, err
 	}
@@ -2439,40 +2404,37 @@ func (s *Service) newClientResolveRevision(repo *v1alpha1.Repository, revision s
 func (s *Service) newHelmClientResolveRevision(repo *v1alpha1.Repository, revision string, chart string, noRevisionCache bool) (helm.Client, string, error) {
 	enableOCI := repo.EnableOCI || helm.IsHelmOciRepo(repo.Repo)
 	helmClient := s.newHelmClient(repo.Repo, repo.GetHelmCreds(), enableOCI, repo.Proxy, repo.NoProxy, helm.WithIndexCache(s.cache), helm.WithChartPaths(s.chartPaths))
-	if helm.IsVersion(revision) {
+
+	// Note: This check runs the risk of returning a version which is not found in the helm registry.
+	if versions.IsVersion(revision) {
 		return helmClient, revision, nil
 	}
-	constraints, err := semver.NewConstraint(revision)
-	if err != nil {
-		return nil, "", fmt.Errorf("invalid revision '%s': %w", revision, err)
-	}
 
+	var tags []string
 	if enableOCI {
-		tags, err := helmClient.GetTags(chart, noRevisionCache)
+		var err error
+		tags, err = helmClient.GetTags(chart, noRevisionCache)
 		if err != nil {
 			return nil, "", fmt.Errorf("unable to get tags: %w", err)
 		}
-
-		version, err := tags.MaxVersion(constraints)
+	} else {
+		index, err := helmClient.GetIndex(noRevisionCache, s.initConstants.HelmRegistryMaxIndexSize)
 		if err != nil {
-			return nil, "", fmt.Errorf("no version for constraints: %w", err)
+			return nil, "", err
 		}
-		return helmClient, version.String(), nil
+		entries, err := index.GetEntries(chart)
+		if err != nil {
+			return nil, "", err
+		}
+		tags = entries.Tags()
 	}
 
-	index, err := helmClient.GetIndex(noRevisionCache, s.initConstants.HelmRegistryMaxIndexSize)
+	maxV, err := versions.MaxVersion(revision, tags)
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("invalid revision: %w", err)
 	}
-	entries, err := index.GetEntries(chart)
-	if err != nil {
-		return nil, "", err
-	}
-	version, err := entries.MaxVersion(constraints)
-	if err != nil {
-		return nil, "", err
-	}
-	return helmClient, version.String(), nil
+
+	return helmClient, maxV, nil
 }
 
 // directoryPermissionInitializer ensures the directory has read/write/execute permissions and returns
@@ -2600,13 +2562,10 @@ func (s *Service) GetHelmCharts(_ context.Context, q *apiclient.HelmChartsReques
 	}
 	res := apiclient.HelmChartsResponse{}
 	for chartName, entries := range index.Entries {
-		chart := apiclient.HelmChart{
-			Name: chartName,
-		}
-		for _, entry := range entries {
-			chart.Versions = append(chart.Versions, entry.Version)
-		}
-		res.Items = append(res.Items, &chart)
+		res.Items = append(res.Items, &apiclient.HelmChart{
+			Name:     chartName,
+			Versions: entries.Tags(),
+		})
 	}
 	return &res, nil
 }

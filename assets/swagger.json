@@ -920,6 +920,11 @@
             "type": "string",
             "name": "project",
             "in": "query"
+          },
+          {
+            "type": "boolean",
+            "name": "matchCase",
+            "in": "query"
           }
         ],
         "responses": {
@@ -1152,6 +1157,11 @@
           {
             "type": "string",
             "name": "project",
+            "in": "query"
+          },
+          {
+            "type": "boolean",
+            "name": "matchCase",
             "in": "query"
           }
         ],
@@ -1480,43 +1490,8 @@
             "in": "body",
             "required": true,
             "schema": {
-              "type": "string"
+              "$ref": "#/definitions/applicationResourceActionRunRequest"
             }
-          },
-          {
-            "type": "string",
-            "name": "namespace",
-            "in": "query"
-          },
-          {
-            "type": "string",
-            "name": "resourceName",
-            "in": "query"
-          },
-          {
-            "type": "string",
-            "name": "version",
-            "in": "query"
-          },
-          {
-            "type": "string",
-            "name": "group",
-            "in": "query"
-          },
-          {
-            "type": "string",
-            "name": "kind",
-            "in": "query"
-          },
-          {
-            "type": "string",
-            "name": "appNamespace",
-            "in": "query"
-          },
-          {
-            "type": "string",
-            "name": "project",
-            "in": "query"
           }
         ],
         "responses": {
@@ -5022,6 +4997,55 @@
     "applicationOperationTerminateResponse": {
       "type": "object"
     },
+    "applicationResourceActionParameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "applicationResourceActionRunRequest": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "appNamespace": {
+          "type": "string"
+        },
+        "group": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        },
+        "resourceActionParameters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/applicationResourceActionParameters"
+          }
+        },
+        "resourceName": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
     "applicationResourceActionsListResponse": {
       "type": "object",
       "properties": {
@@ -6429,6 +6453,7 @@
     },
     "v1PortStatus": {
       "type": "object",
+      "title": "PortStatus represents the error condition of a service port",
       "properties": {
         "error": {
           "type": "string",
@@ -6465,6 +6490,24 @@
         "roleARN": {
           "description": "RoleARN contains optional role ARN. If set then AWS IAM Authenticator assume a role to perform cluster operations instead of the default AWS credential provider chain.",
           "type": "string"
+        }
+      }
+    },
+    "v1alpha1AppHealthStatus": {
+      "type": "object",
+      "title": "AppHealthStatus contains information about the currently observed health state of an application",
+      "properties": {
+        "lastTransitionTime": {
+          "$ref": "#/definitions/v1Time"
+        },
+        "message": {
+          "description": "Deprecated: this field is not used and will be removed in a future release.",
+          "type": "string",
+          "title": "Message is a human-readable informational message describing the health status"
+        },
+        "status": {
+          "type": "string",
+          "title": "Status holds the status code of the application"
         }
       }
     },
@@ -6518,7 +6561,7 @@
         },
         "description": {
           "type": "string",
-          "title": "Description contains optional project description"
+          "title": "Description contains optional project description\n+kubebuilder:validation:MaxLength=255"
         },
         "destinationServiceAccounts": {
           "description": "DestinationServiceAccounts holds information about the service accounts to be impersonated for the application sync operation for each destination.",
@@ -7312,6 +7355,10 @@
           "description": "KubeVersion specifies the Kubernetes API version to pass to Helm when templating manifests. By default, Argo CD\nuses the Kubernetes version of the target cluster.",
           "type": "string"
         },
+        "labelIncludeTemplates": {
+          "type": "boolean",
+          "title": "LabelIncludeTemplates specifies whether to apply common labels to resource templates or not"
+        },
         "labelWithoutSelector": {
           "type": "boolean",
           "title": "LabelWithoutSelector specifies whether to apply common labels to resource selectors or not"
@@ -7460,7 +7507,7 @@
           "title": "ControllerNamespace indicates the namespace in which the application controller is located"
         },
         "health": {
-          "$ref": "#/definitions/v1alpha1HealthStatus"
+          "$ref": "#/definitions/v1alpha1AppHealthStatus"
         },
         "history": {
           "type": "array",
@@ -8013,6 +8060,9 @@
     "v1alpha1GitFileGeneratorItem": {
       "type": "object",
       "properties": {
+        "exclude": {
+          "type": "boolean"
+        },
         "path": {
           "type": "string"
         }
@@ -8105,7 +8155,7 @@
     },
     "v1alpha1HealthStatus": {
       "type": "object",
-      "title": "HealthStatus contains information about the currently observed health state of an application or resource",
+      "title": "HealthStatus contains information about the currently observed health state of a resource",
       "properties": {
         "lastTransitionTime": {
           "$ref": "#/definitions/v1Time"
@@ -8116,7 +8166,7 @@
         },
         "status": {
           "type": "string",
-          "title": "Status holds the status code of the application or resource"
+          "title": "Status holds the status code of the resource"
         }
       }
     },
@@ -8726,6 +8776,13 @@
         },
         "template": {
           "$ref": "#/definitions/v1alpha1ApplicationSetTemplate"
+        },
+        "values": {
+          "type": "object",
+          "title": "Values contains key/value pairs which are passed directly as parameters to the template",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       }
     },
@@ -8855,8 +8912,8 @@
           "type": "string"
         },
         "pullRequestState": {
-          "type": "string",
-          "title": "PullRequestState is an additional MRs filter to get only those with a certain state. Default: \"\" (all states)"
+          "description": "PullRequestState is an additional MRs filter to get only those with a certain state. Default: \"\" (all states).\nValid values: opened, closed, merged, locked\".",
+          "type": "string"
         },
         "tokenRef": {
           "$ref": "#/definitions/v1alpha1SecretRef"
@@ -8874,6 +8931,13 @@
         "insecure": {
           "description": "Allow insecure tls, for self-signed certificates; default: false.",
           "type": "boolean"
+        },
+        "labels": {
+          "type": "array",
+          "title": "Labels is used to filter the PRs that you want to target",
+          "items": {
+            "type": "string"
+          }
         },
         "owner": {
           "description": "Gitea org or user to scan. Required.",
@@ -10084,6 +10148,10 @@
           "type": "boolean",
           "title": "AllowEmpty allows apps have zero live resources (default: false)"
         },
+        "enable": {
+          "type": "boolean",
+          "title": "Enable allows apps to explicitly control automated sync"
+        },
         "prune": {
           "type": "boolean",
           "title": "Prune specifies whether to delete resources from the cluster that are not found in the sources anymore as part of automated sync (default: false)"
@@ -10184,6 +10252,10 @@
           "items": {
             "type": "string"
           }
+        },
+        "description": {
+          "type": "string",
+          "title": "Description of the sync that will be applied to the schedule, can be used to add any information such as a ticket number for example"
         },
         "duration": {
           "type": "string",

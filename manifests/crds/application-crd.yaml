@@ -397,6 +397,10 @@ spec:
                               KubeVersion specifies the Kubernetes API version to pass to Helm when templating manifests. By default, Argo CD
                               uses the Kubernetes version of the target cluster.
                             type: string
+                          labelIncludeTemplates:
+                            description: LabelIncludeTemplates specifies whether to
+                              apply common labels to resource templates or not
+                            type: boolean
                           labelWithoutSelector:
                             description: LabelWithoutSelector specifies whether to
                               apply common labels to resource selectors or not
@@ -782,6 +786,10 @@ spec:
                                 KubeVersion specifies the Kubernetes API version to pass to Helm when templating manifests. By default, Argo CD
                                 uses the Kubernetes version of the target cluster.
                               type: string
+                            labelIncludeTemplates:
+                              description: LabelIncludeTemplates specifies whether
+                                to apply common labels to resource templates or not
+                              type: boolean
                             labelWithoutSelector:
                               description: LabelWithoutSelector specifies whether
                                 to apply common labels to resource selectors or not
@@ -1277,6 +1285,10 @@ spec:
                           KubeVersion specifies the Kubernetes API version to pass to Helm when templating manifests. By default, Argo CD
                           uses the Kubernetes version of the target cluster.
                         type: string
+                      labelIncludeTemplates:
+                        description: LabelIncludeTemplates specifies whether to apply
+                          common labels to resource templates or not
+                        type: boolean
                       labelWithoutSelector:
                         description: LabelWithoutSelector specifies whether to apply
                           common labels to resource selectors or not
@@ -1710,6 +1722,10 @@ spec:
                             KubeVersion specifies the Kubernetes API version to pass to Helm when templating manifests. By default, Argo CD
                             uses the Kubernetes version of the target cluster.
                           type: string
+                        labelIncludeTemplates:
+                          description: LabelIncludeTemplates specifies whether to
+                            apply common labels to resource templates or not
+                          type: boolean
                         labelWithoutSelector:
                           description: LabelWithoutSelector specifies whether to apply
                             common labels to resource selectors or not
@@ -1866,6 +1882,10 @@ spec:
                         description: 'AllowEmpty allows apps have zero live resources
                           (default: false)'
                         type: boolean
+                      enabled:
+                        description: Enable allows apps to explicitly control automated
+                          sync
+                        type: boolean
                       prune:
                         description: 'Prune specifies whether to delete resources
                           from the cluster that are not found in the sources anymore
@@ -1969,12 +1989,13 @@ spec:
                     format: date-time
                     type: string
                   message:
-                    description: Message is a human-readable informational message
-                      describing the health status
+                    description: |-
+                      Message is a human-readable informational message describing the health status
+
+                      Deprecated: this field is not used and will be removed in a future release.
                     type: string
                   status:
-                    description: Status holds the status code of the application or
-                      resource
+                    description: Status holds the status code of the application
                     type: string
                 type: object
               history:
@@ -2256,6 +2277,10 @@ spec:
                                 KubeVersion specifies the Kubernetes API version to pass to Helm when templating manifests. By default, Argo CD
                                 uses the Kubernetes version of the target cluster.
                               type: string
+                            labelIncludeTemplates:
+                              description: LabelIncludeTemplates specifies whether
+                                to apply common labels to resource templates or not
+                              type: boolean
                             labelWithoutSelector:
                               description: LabelWithoutSelector specifies whether
                                 to apply common labels to resource selectors or not
@@ -2643,6 +2668,11 @@ spec:
                                   KubeVersion specifies the Kubernetes API version to pass to Helm when templating manifests. By default, Argo CD
                                   uses the Kubernetes version of the target cluster.
                                 type: string
+                              labelIncludeTemplates:
+                                description: LabelIncludeTemplates specifies whether
+                                  to apply common labels to resource templates or
+                                  not
+                                type: boolean
                               labelWithoutSelector:
                                 description: LabelWithoutSelector specifies whether
                                   to apply common labels to resource selectors or
@@ -3181,6 +3211,11 @@ spec:
                                       KubeVersion specifies the Kubernetes API version to pass to Helm when templating manifests. By default, Argo CD
                                       uses the Kubernetes version of the target cluster.
                                     type: string
+                                  labelIncludeTemplates:
+                                    description: LabelIncludeTemplates specifies whether
+                                      to apply common labels to resource templates
+                                      or not
+                                    type: boolean
                                   labelWithoutSelector:
                                     description: LabelWithoutSelector specifies whether
                                       to apply common labels to resource selectors
@@ -3589,6 +3624,11 @@ spec:
                                         KubeVersion specifies the Kubernetes API version to pass to Helm when templating manifests. By default, Argo CD
                                         uses the Kubernetes version of the target cluster.
                                       type: string
+                                    labelIncludeTemplates:
+                                      description: LabelIncludeTemplates specifies
+                                        whether to apply common labels to resource
+                                        templates or not
+                                      type: boolean
                                     labelWithoutSelector:
                                       description: LabelWithoutSelector specifies
                                         whether to apply common labels to resource
@@ -4108,6 +4148,11 @@ spec:
                                   KubeVersion specifies the Kubernetes API version to pass to Helm when templating manifests. By default, Argo CD
                                   uses the Kubernetes version of the target cluster.
                                 type: string
+                              labelIncludeTemplates:
+                                description: LabelIncludeTemplates specifies whether
+                                  to apply common labels to resource templates or
+                                  not
+                                type: boolean
                               labelWithoutSelector:
                                 description: LabelWithoutSelector specifies whether
                                   to apply common labels to resource selectors or
@@ -4507,6 +4552,11 @@ spec:
                                     KubeVersion specifies the Kubernetes API version to pass to Helm when templating manifests. By default, Argo CD
                                     uses the Kubernetes version of the target cluster.
                                   type: string
+                                labelIncludeTemplates:
+                                  description: LabelIncludeTemplates specifies whether
+                                    to apply common labels to resource templates or
+                                    not
+                                  type: boolean
                                 labelWithoutSelector:
                                   description: LabelWithoutSelector specifies whether
                                     to apply common labels to resource selectors or
@@ -4691,8 +4741,10 @@ spec:
                         (e.g., Healthy, Degraded, Progressing).
                       properties:
                         lastTransitionTime:
-                          description: LastTransitionTime is the time the HealthStatus
-                            was set or updated
+                          description: |-
+                            LastTransitionTime is the time the HealthStatus was set or updated
+
+                            Deprecated: this field is not used and will be removed in a future release.
                           format: date-time
                           type: string
                         message:
@@ -4700,8 +4752,7 @@ spec:
                             describing the health status
                           type: string
                         status:
-                          description: Status holds the status code of the application
-                            or resource
+                          description: Status holds the status code of the resource
                           type: string
                       type: object
                     hook:
@@ -5244,6 +5295,11 @@ spec:
                                   KubeVersion specifies the Kubernetes API version to pass to Helm when templating manifests. By default, Argo CD
                                   uses the Kubernetes version of the target cluster.
                                 type: string
+                              labelIncludeTemplates:
+                                description: LabelIncludeTemplates specifies whether
+                                  to apply common labels to resource templates or
+                                  not
+                                type: boolean
                               labelWithoutSelector:
                                 description: LabelWithoutSelector specifies whether
                                   to apply common labels to resource selectors or
@@ -5643,6 +5699,11 @@ spec:
                                     KubeVersion specifies the Kubernetes API version to pass to Helm when templating manifests. By default, Argo CD
                                     uses the Kubernetes version of the target cluster.
                                   type: string
+                                labelIncludeTemplates:
+                                  description: LabelIncludeTemplates specifies whether
+                                    to apply common labels to resource templates or
+                                    not
+                                  type: boolean
                                 labelWithoutSelector:
                                   description: LabelWithoutSelector specifies whether
                                     to apply common labels to resource selectors or

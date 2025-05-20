@@ -126,7 +126,7 @@ func init() {
 	clusterCacheListSemaphoreSize = env.ParseInt64FromEnv(EnvClusterCacheListSemaphore, clusterCacheListSemaphoreSize, 0, math.MaxInt64)
 	clusterCacheAttemptLimit = int32(env.ParseNumFromEnv(EnvClusterCacheAttemptLimit, int(clusterCacheAttemptLimit), 1, math.MaxInt32))
 	clusterCacheRetryUseBackoff = env.ParseBoolFromEnv(EnvClusterCacheRetryUseBackoff, false)
-	clusterCacheBatchEventsProcessing = env.ParseBoolFromEnv(EnvClusterCacheBatchEventsProcessing, false)
+	clusterCacheBatchEventsProcessing = env.ParseBoolFromEnv(EnvClusterCacheBatchEventsProcessing, true)
 	clusterCacheEventsProcessingInterval = env.ParseDurationFromEnv(EnvClusterCacheEventsProcessingInterval, clusterCacheEventsProcessingInterval, 0, math.MaxInt64)
 }
 
@@ -242,6 +242,10 @@ func (c *liveStateCache) loadCacheSettings() (*cacheSettings, error) {
 	if err != nil {
 		return nil, err
 	}
+	trackingMethod, err := c.settingsMgr.GetTrackingMethod()
+	if err != nil {
+		return nil, err
+	}
 	installationID, err := c.settingsMgr.GetInstallationID()
 	if err != nil {
 		return nil, err
@@ -267,7 +271,7 @@ func (c *liveStateCache) loadCacheSettings() (*cacheSettings, error) {
 		ResourcesFilter:        resourcesFilter,
 	}
 
-	return &cacheSettings{clusterSettings, appInstanceLabelKey, argo.GetTrackingMethod(c.settingsMgr), installationID, resourceUpdatesOverrides, ignoreResourceUpdatesEnabled}, nil
+	return &cacheSettings{clusterSettings, appInstanceLabelKey, appv1.TrackingMethod(trackingMethod), installationID, resourceUpdatesOverrides, ignoreResourceUpdatesEnabled}, nil
 }
 
 func asResourceNode(r *clustercache.Resource) appv1.ResourceNode {
@@ -278,8 +282,14 @@ func asResourceNode(r *clustercache.Resource) appv1.ResourceNode {
 	parentRefs := make([]appv1.ResourceRef, len(r.OwnerRefs))
 	for i, ownerRef := range r.OwnerRefs {
 		ownerGvk := schema.FromAPIVersionAndKind(ownerRef.APIVersion, ownerRef.Kind)
-		ownerKey := kube.NewResourceKey(ownerGvk.Group, ownerRef.Kind, r.Ref.Namespace, ownerRef.Name)
-		parentRefs[i] = appv1.ResourceRef{Name: ownerRef.Name, Kind: ownerKey.Kind, Namespace: r.Ref.Namespace, Group: ownerKey.Group, UID: string(ownerRef.UID)}
+		parentRefs[i] = appv1.ResourceRef{
+			Group:     ownerGvk.Group,
+			Kind:      ownerGvk.Kind,
+			Version:   ownerGvk.Version,
+			Namespace: r.Ref.Namespace,
+			Name:      ownerRef.Name,
+			UID:       string(ownerRef.UID),
+		}
 	}
 	var resHealth *appv1.HealthStatus
 	resourceInfo := resInfo(r)
@@ -723,7 +733,7 @@ func (c *liveStateCache) GetManagedLiveObjs(destCluster *appv1.Cluster, a *appv1
 func (c *liveStateCache) GetVersionsInfo(server *appv1.Cluster) (string, []kube.APIResourceInfo, error) {
 	clusterInfo, err := c.getSyncedCluster(server)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to get cluster info for %q: %w", server, err)
+		return "", nil, fmt.Errorf("failed to get cluster info for %q: %w", server.Server, err)
 	}
 	return clusterInfo.GetServerVersion(), clusterInfo.GetAPIResources(), nil
 }

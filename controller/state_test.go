@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dario.cat/mergo"
+	cachemocks "github.com/argoproj/gitops-engine/pkg/cache/mocks"
 	"github.com/argoproj/gitops-engine/pkg/health"
 	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
 	"github.com/argoproj/gitops-engine/pkg/utils/kube"
@@ -15,10 +16,12 @@ import (
 	"github.com/sirupsen/logrus"
 	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -28,7 +31,6 @@ import (
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/argoproj/argo-cd/v3/reposerver/apiclient"
 	"github.com/argoproj/argo-cd/v3/test"
-	"github.com/argoproj/argo-cd/v3/util/argo"
 )
 
 // TestCompareAppStateEmpty tests comparison when both git and live have no objects
@@ -70,12 +72,12 @@ func TestCompareAppStateRepoError(t *testing.T) {
 	revisions = append(revisions, "")
 	compRes, err := ctrl.appStateManager.CompareAppState(app, &defaultProj, revisions, sources, false, false, nil, false, false)
 	assert.Nil(t, compRes)
-	require.EqualError(t, err, CompareStateRepoError.Error())
+	require.EqualError(t, err, ErrCompareStateRepo.Error())
 
 	// expect to still get compare state error to as inside grace period
 	compRes, err = ctrl.appStateManager.CompareAppState(app, &defaultProj, revisions, sources, false, false, nil, false, false)
 	assert.Nil(t, compRes)
-	require.EqualError(t, err, CompareStateRepoError.Error())
+	require.EqualError(t, err, ErrCompareStateRepo.Error())
 
 	time.Sleep(10 * time.Second)
 	// expect to not get error as outside of grace period, but status should be unknown
@@ -715,8 +717,7 @@ func TestSetHealth(t *testing.T) {
 	compRes, err := ctrl.appStateManager.CompareAppState(app, &defaultProj, revisions, sources, false, false, nil, false, false)
 	require.NoError(t, err)
 
-	assert.Equal(t, health.HealthStatusHealthy, compRes.healthStatus.Status)
-	assert.False(t, compRes.healthStatus.LastTransitionTime.IsZero())
+	assert.Equal(t, health.HealthStatusHealthy, compRes.healthStatus)
 }
 
 func TestPreserveStatusTimestamp(t *testing.T) {
@@ -752,8 +753,7 @@ func TestPreserveStatusTimestamp(t *testing.T) {
 	compRes, err := ctrl.appStateManager.CompareAppState(app, &defaultProj, revisions, sources, false, false, nil, false, false)
 	require.NoError(t, err)
 
-	assert.Equal(t, health.HealthStatusHealthy, compRes.healthStatus.Status)
-	assert.Equal(t, timestamp, *compRes.healthStatus.LastTransitionTime)
+	assert.Equal(t, health.HealthStatusHealthy, compRes.healthStatus)
 }
 
 func TestSetHealthSelfReferencedApp(t *testing.T) {
@@ -790,8 +790,7 @@ func TestSetHealthSelfReferencedApp(t *testing.T) {
 	compRes, err := ctrl.appStateManager.CompareAppState(app, &defaultProj, revisions, sources, false, false, nil, false, false)
 	require.NoError(t, err)
 
-	assert.Equal(t, health.HealthStatusHealthy, compRes.healthStatus.Status)
-	assert.False(t, compRes.healthStatus.LastTransitionTime.IsZero())
+	assert.Equal(t, health.HealthStatusHealthy, compRes.healthStatus)
 }
 
 func TestSetManagedResourcesWithOrphanedResources(t *testing.T) {
@@ -866,8 +865,7 @@ func TestReturnUnknownComparisonStateOnSettingLoadError(t *testing.T) {
 	compRes, err := ctrl.appStateManager.CompareAppState(app, &defaultProj, revisions, sources, false, false, nil, false, false)
 	require.NoError(t, err)
 
-	assert.Equal(t, health.HealthStatusUnknown, compRes.healthStatus.Status)
-	assert.False(t, compRes.healthStatus.LastTransitionTime.IsZero())
+	assert.Equal(t, health.HealthStatusUnknown, compRes.healthStatus)
 	assert.Equal(t, v1alpha1.SyncStatusCodeUnknown, compRes.syncStatus.Status)
 }
 
@@ -908,6 +906,9 @@ func Test_appStateManager_persistRevisionHistory(t *testing.T) {
 	}, nil)
 	manager := ctrl.appStateManager.(*appStateManager)
 	setRevisionHistoryLimit := func(value int) {
+		if value < 0 {
+			value = 0
+		}
 		i := int64(value)
 		app.Spec.RevisionHistoryLimit = &i
 	}
@@ -951,6 +952,11 @@ func Test_appStateManager_persistRevisionHistory(t *testing.T) {
 	err := manager.persistRevisionHistory(app, "my-revision", v1alpha1.ApplicationSource{}, []string{}, []v1alpha1.ApplicationSource{}, false, metav1NowTime, v1alpha1.OperationInitiator{})
 	require.NoError(t, err)
 	assert.Equal(t, app.Status.History.LastRevisionHistory().DeployStartedAt, &metav1NowTime)
+
+	// negative limit to 0
+	setRevisionHistoryLimit(-1)
+	addHistory()
+	assert.Empty(t, app.Status.History)
 }
 
 // helper function to read contents of a file to string
@@ -1277,7 +1283,7 @@ func TestSignedResponseSignatureRequired(t *testing.T) {
 }
 
 func TestComparisonResult_GetHealthStatus(t *testing.T) {
-	status := &v1alpha1.HealthStatus{Status: health.HealthStatusMissing}
+	status := health.HealthStatusMissing
 	res := comparisonResult{
 		healthStatus: status,
 	}
@@ -1412,8 +1418,8 @@ func TestIsLiveResourceManaged(t *testing.T) {
 		configObj := managedObj.DeepCopy()
 
 		// then
-		assert.True(t, manager.isSelfReferencedObj(managedObj, configObj, appName, argo.TrackingMethodLabel, ""))
-		assert.True(t, manager.isSelfReferencedObj(managedObj, configObj, appName, argo.TrackingMethodAnnotation, ""))
+		assert.True(t, manager.isSelfReferencedObj(managedObj, configObj, appName, v1alpha1.TrackingMethodLabel, ""))
+		assert.True(t, manager.isSelfReferencedObj(managedObj, configObj, appName, v1alpha1.TrackingMethodAnnotation, ""))
 	})
 	t.Run("will return true if tracked with label", func(t *testing.T) {
 		// given
@@ -1421,43 +1427,43 @@ func TestIsLiveResourceManaged(t *testing.T) {
 		configObj := managedObjWithLabel.DeepCopy()
 
 		// then
-		assert.True(t, manager.isSelfReferencedObj(managedObjWithLabel, configObj, appName, argo.TrackingMethodLabel, ""))
+		assert.True(t, manager.isSelfReferencedObj(managedObjWithLabel, configObj, appName, v1alpha1.TrackingMethodLabel, ""))
 	})
 	t.Run("will handle if trackingId has wrong resource name and config is nil", func(t *testing.T) {
 		// given
 		t.Parallel()
 
 		// then
-		assert.True(t, manager.isSelfReferencedObj(unmanagedObjWrongName, nil, appName, argo.TrackingMethodLabel, ""))
-		assert.False(t, manager.isSelfReferencedObj(unmanagedObjWrongName, nil, appName, argo.TrackingMethodAnnotation, ""))
+		assert.True(t, manager.isSelfReferencedObj(unmanagedObjWrongName, nil, appName, v1alpha1.TrackingMethodLabel, ""))
+		assert.False(t, manager.isSelfReferencedObj(unmanagedObjWrongName, nil, appName, v1alpha1.TrackingMethodAnnotation, ""))
 	})
 	t.Run("will handle if trackingId has wrong resource group and config is nil", func(t *testing.T) {
 		// given
 		t.Parallel()
 
 		// then
-		assert.True(t, manager.isSelfReferencedObj(unmanagedObjWrongGroup, nil, appName, argo.TrackingMethodLabel, ""))
-		assert.False(t, manager.isSelfReferencedObj(unmanagedObjWrongGroup, nil, appName, argo.TrackingMethodAnnotation, ""))
+		assert.True(t, manager.isSelfReferencedObj(unmanagedObjWrongGroup, nil, appName, v1alpha1.TrackingMethodLabel, ""))
+		assert.False(t, manager.isSelfReferencedObj(unmanagedObjWrongGroup, nil, appName, v1alpha1.TrackingMethodAnnotation, ""))
 	})
 	t.Run("will handle if trackingId has wrong kind and config is nil", func(t *testing.T) {
 		// given
 		t.Parallel()
 
 		// then
-		assert.True(t, manager.isSelfReferencedObj(unmanagedObjWrongKind, nil, appName, argo.TrackingMethodLabel, ""))
-		assert.False(t, manager.isSelfReferencedObj(unmanagedObjWrongKind, nil, appName, argo.TrackingMethodAnnotation, ""))
+		assert.True(t, manager.isSelfReferencedObj(unmanagedObjWrongKind, nil, appName, v1alpha1.TrackingMethodLabel, ""))
+		assert.False(t, manager.isSelfReferencedObj(unmanagedObjWrongKind, nil, appName, v1alpha1.TrackingMethodAnnotation, ""))
 	})
 	t.Run("will handle if trackingId has wrong namespace and config is nil", func(t *testing.T) {
 		// given
 		t.Parallel()
 
 		// then
-		assert.True(t, manager.isSelfReferencedObj(unmanagedObjWrongNamespace, nil, appName, argo.TrackingMethodLabel, ""))
-		assert.False(t, manager.isSelfReferencedObj(unmanagedObjWrongNamespace, nil, appName, argo.TrackingMethodAnnotationAndLabel, ""))
+		assert.True(t, manager.isSelfReferencedObj(unmanagedObjWrongNamespace, nil, appName, v1alpha1.TrackingMethodLabel, ""))
+		assert.False(t, manager.isSelfReferencedObj(unmanagedObjWrongNamespace, nil, appName, v1alpha1.TrackingMethodAnnotationAndLabel, ""))
 	})
 	t.Run("will return true if live is nil", func(t *testing.T) {
 		t.Parallel()
-		assert.True(t, manager.isSelfReferencedObj(nil, nil, appName, argo.TrackingMethodAnnotation, ""))
+		assert.True(t, manager.isSelfReferencedObj(nil, nil, appName, v1alpha1.TrackingMethodAnnotation, ""))
 	})
 
 	t.Run("will handle upgrade in desired state APIGroup", func(t *testing.T) {
@@ -1467,7 +1473,7 @@ func TestIsLiveResourceManaged(t *testing.T) {
 		delete(config.GetAnnotations(), common.AnnotationKeyAppInstance)
 
 		// then
-		assert.True(t, manager.isSelfReferencedObj(managedWrongAPIGroup, config, appName, argo.TrackingMethodAnnotation, ""))
+		assert.True(t, manager.isSelfReferencedObj(managedWrongAPIGroup, config, appName, v1alpha1.TrackingMethodAnnotation, ""))
 	})
 }
 
@@ -1795,4 +1801,25 @@ func TestCompareAppStateRevisionUpdatedWithHelmSource(t *testing.T) {
 	assert.NotNil(t, compRes)
 	assert.NotNil(t, compRes.syncStatus)
 	assert.True(t, compRes.revisionUpdated)
+}
+
+func Test_normalizeClusterScopeTracking(t *testing.T) {
+	obj := kube.MustToUnstructured(&rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test",
+			Namespace: "test",
+		},
+	})
+	c := cachemocks.ClusterCache{}
+	c.On("IsNamespaced", mock.Anything).Return(false, nil)
+	var called bool
+	err := normalizeClusterScopeTracking([]*unstructured.Unstructured{obj}, &c, func(u *unstructured.Unstructured) error {
+		// We expect that the normalization function will call this callback with an obj that has had the namespace set
+		// to empty.
+		called = true
+		assert.Empty(t, u.GetNamespace())
+		return nil
+	})
+	require.NoError(t, err)
+	require.True(t, called, "normalization function should have called the callback function")
 }
