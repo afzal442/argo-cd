@@ -169,8 +169,7 @@ func TestCanIGetLogs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := accountFixture.Given(t)
 			ctx.
-				Name("test").
-				Project(ProjectName)
+				Name("test")
 			ctx.
 				When().
 				Create().
