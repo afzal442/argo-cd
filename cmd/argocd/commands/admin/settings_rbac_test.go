@@ -309,3 +309,15 @@ func TestNewRBACValidateCommand(t *testing.T) {
 	assert.Equal(t, "validate", command.Name())
 	assert.Equal(t, "Validate RBAC policy", command.Short)
 }
+
+func TestCheckPolicyProjectScopedWildcardExpansion(t *testing.T) {
+	// Test that when a project-scoped resource is used with subResource="*",
+	// it gets expanded to "*/*/*"
+	userPolicy := "p, role:test, applications, get, *, allow"
+	res := checkPolicy("role:test", "get", "applications", "*", "", userPolicy, "", "", false, "argocd")
+	assert.True(t, res)
+
+	// Also test with empty subResource
+	res = checkPolicy("role:test", "get", "applications", "", "", userPolicy, "", "", false, "argocd")
+	assert.True(t, res)
+}

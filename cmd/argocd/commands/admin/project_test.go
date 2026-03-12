@@ -135,3 +135,18 @@ func TestGetModification_NotSupported(t *testing.T) {
 	_, err := getModification("bar", "*", "*", "allow", namespace)
 	assert.Errorf(t, err, "modification bar is not supported")
 }
+
+func TestGetModification_SetWithNormalization(t *testing.T) {
+	// "applications" is a resource that requires normalization per rbac.NeedNormalization
+	f, err := getModification("set", "applications", "*", "allow", "argocd")
+	assert.NoError(t, err)
+	assert.NotNil(t, f)
+
+	result := f("myproject", "get")
+	// The subresource should be normalized (namespace appended)
+	assert.Contains(t, result, "applications")
+	assert.Contains(t, result, "get")
+	assert.Contains(t, result, "allow")
+	// Verify normalization happened: subresource should contain the namespace
+	assert.Contains(t, result, "argocd")
+}
