@@ -139,7 +139,7 @@ func TestGetModification_NotSupported(t *testing.T) {
 func TestGetModification_SetWithNormalization(t *testing.T) {
 	// "applications" is a resource that requires normalization per rbac.NeedNormalization
 	f, err := getModification("set", "applications", "*", "allow", "argocd")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.NotNil(t, f)
 
 	result := f("myproject", "get")
