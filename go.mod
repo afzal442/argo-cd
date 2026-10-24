@@ -131,7 +131,7 @@ require (
 	k8s.io/kubectl v0.37.0
 	k8s.io/streaming v0.37.0
 	k8s.io/utils v0.0.0-20260626114624-be93311217bd
-	layeh.com/gopher-json v0.0.0-20190114024228-97fed8db8427
+	layeh.com/gopher-json v0.0.0-20201124131017-552bb3c4c3bf
 	oras.land/oras-go/v2 v2.6.4
 	sigs.k8s.io/controller-runtime v0.25.2
 	sigs.k8s.io/kustomize/api v0.21.2
